@@ -400,7 +400,8 @@ class Eagle3OneModelWorker(nn.Module):
 
         # Predict draft tokens
         next_draft_tokens = []
-        for i in range(self.max_draft_len - len(draft_model.parallel_draft_heads)):
+        num_fused_heads = draft_model.fused_parallel_draft_heads.num_heads if draft_model.fused_parallel_draft_heads else 0
+        for i in range(self.max_draft_len - num_fused_heads):
             if i == 0:
                 start_ids_gen = (spec_metadata.batch_indices_cuda[:num_gens] *
                                  (self.max_draft_len + 1)).long()
@@ -470,12 +471,19 @@ class Eagle3OneModelWorker(nn.Module):
                 "attn_metadata": attn_metadata,
                 "spec_metadata": spec_metadata,
             }
-        for layer in draft_model.parallel_draft_heads:
-            med_out = layer.model(hidden_states=final_hidden_states)
-            logits = layer.logits_processor(med_out, layer.lm_head,
-                                            attn_metadata, True)
-            new_draft_token = self.draft_decoder(logits, layer)
-            next_draft_tokens.append(new_draft_token)
+        # Process fused parallel draft heads in a single forward pass
+        if draft_model.fused_parallel_draft_heads is not None:
+            # Forward through all fused heads at once
+            # Returns logits of shape [batch, num_heads, vocab_size]
+            fused_logits = draft_model.fused_parallel_draft_heads.forward(
+                attn_metadata=attn_metadata,
+                hidden_states=final_hidden_states,
+            )
+            # Sample tokens for each head
+            for head_idx in range(draft_model.fused_parallel_draft_heads.num_heads):
+                head_logits = fused_logits[:, head_idx, :]  # [batch, vocab_size]
+                new_draft_token = self.draft_decoder(head_logits, draft_model)
+                next_draft_tokens.append(new_draft_token)
 
         next_draft_tokens = torch.stack(next_draft_tokens, dim=1)
 

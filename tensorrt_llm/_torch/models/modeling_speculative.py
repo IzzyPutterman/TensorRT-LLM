@@ -1,4 +1,3 @@
-import re
 from typing import Dict, Generic, List, Optional, Tuple
 
 import torch
@@ -311,17 +310,17 @@ class Eagle3ForCausalLM(DecoderModelForCausalLM[Eagle3DraftModel, LlamaConfig]):
                          vocab_size=draft_vocab_size)
         self.load_lm_head_from_target = True
         config = model_config.pretrained_config
-        if model_config.pretrained_config.eagle_config.get(
-                "parallel_draft_step", 1) > 1:
-            from .modeling_medusa import MedusaForCausalLM
-            self.parallel_draft_heads = nn.ModuleList([
-                MedusaForCausalLM(model_config, start_layer_idx + config.num_hidden_layers, head_idx=i)
-                for i in range(
-                    model_config.pretrained_config.eagle_config.get(
-                        "parallel_draft_step", 1)-1)
-            ])
+        num_parallel_heads = model_config.pretrained_config.eagle_config.get(
+            "parallel_draft_step", 1) - 1
+        if num_parallel_heads > 0:
+            from .modeling_medusa import FusedMedusaForCausalLM
+            # Use fused Medusa heads with TP support
+            self.fused_parallel_draft_heads = FusedMedusaForCausalLM(
+                model_config,
+                num_heads=num_parallel_heads
+            )
         else:
-            self.parallel_draft_heads = nn.ModuleList([])
+            self.fused_parallel_draft_heads = None
 
     def forward(
         self,
@@ -353,31 +352,33 @@ class Eagle3ForCausalLM(DecoderModelForCausalLM[Eagle3DraftModel, LlamaConfig]):
 
     def load_weights(self, weights: Dict, weight_mapper: BaseWeightMapper):
         new_weights = {}
+        fused_head_weights = {}
+
         for k, v in weights.items():
             if 'parallel_draft_heads' in k:
-                # parallel_draft_heads is a direct attribute of Eagle3ForCausalLM,
-                # not under self.model, so keep the key as-is but transform the format.
+                # Collect weights for fused parallel draft heads
                 # Checkpoint format: parallel_draft_heads.{head_idx}.{layer_idx}.linear.{param}
-                # Model format: parallel_draft_heads.{head_idx}.model.medusa_layers.{layer_idx}.{param}
-                match = re.match(r'parallel_draft_heads\.(\d+)\.(\d+)\.linear\.(.+)', k)
-                if match:
-                    head_idx, layer_idx, param = match.groups()
-                    new_k = f'parallel_draft_heads.{head_idx}.model.medusa_layers.{layer_idx}.{param}'
-                else:
-                    new_k = k
+                # Keep the original format for FusedMedusaHeads.load_weights()
+                fused_head_weights[k] = v
             elif 'lm_head' not in k:
                 new_k = "model." + k
+                new_weights[new_k] = v
             else:
                 self.load_lm_head_from_target = False
-                new_k = k
-            new_weights[new_k] = v
+                new_weights[k] = v
+
         if self.load_lm_head_from_target:
             super().load_weights(weights=new_weights,
                                  weight_mapper=weight_mapper,
-                                 skip_modules=['lm_head'])
+                                 skip_modules=['lm_head', 'fused_parallel_draft_heads'])
         else:
             super().load_weights(weights=new_weights,
-                                 weight_mapper=weight_mapper)
+                                 weight_mapper=weight_mapper,
+                                 skip_modules=['fused_parallel_draft_heads'])
+
+        # Load fused parallel draft heads weights separately
+        if self.fused_parallel_draft_heads is not None and fused_head_weights:
+            self.fused_parallel_draft_heads.load_weights(fused_head_weights)
 
     def load_weights_from_target_model(self,
                                        target_model: torch.nn.Module) -> None:
@@ -385,6 +386,9 @@ class Eagle3ForCausalLM(DecoderModelForCausalLM[Eagle3DraftModel, LlamaConfig]):
             self.model.embed_tokens = target_model.model.embed_tokens
         if self.load_lm_head_from_target:
             self.lm_head = target_model.lm_head
+            # Update the lm_head reference in fused parallel draft heads
+            # if self.fused_parallel_draft_heads is not None:
+            #     self.fused_parallel_draft_heads.lm_head = self.lm_head
 
     def apply_eagle3_fc(self, hidden_states: torch.Tensor) -> torch.Tensor:
         """
