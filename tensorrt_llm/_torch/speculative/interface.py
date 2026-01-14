@@ -64,6 +64,7 @@ class SpeculativeDecodingMode(IntEnum):
     EAGLE3_ONE_MODEL = auto()
     NGRAM = auto()
     DRAFT_TARGET = auto()
+    DRAFT_TARGET_ONE_MODEL = auto()
     USER_PROVIDED = auto()
     SAVE_HIDDEN_STATES = auto()
     PARD = auto()
@@ -87,7 +88,11 @@ class SpeculativeDecodingMode(IntEnum):
 
     def use_one_engine(self):
         return self.is_eagle3_one_model() or self.is_mtp_one_model(
+<<<<<<< HEAD
         ) or self.is_pard()
+=======
+        ) or self.is_draft_target_one_model()
+>>>>>>> 9a360b295 (Draft Target One Model)
 
     def is_eagle3_one_model(self):
         return self == SpeculativeDecodingMode.EAGLE3_ONE_MODEL
@@ -107,11 +112,15 @@ class SpeculativeDecodingMode(IntEnum):
     def is_draft_target(self):
         return self == SpeculativeDecodingMode.DRAFT_TARGET
 
+    def is_draft_target_one_model(self):
+        return self == SpeculativeDecodingMode.DRAFT_TARGET_ONE_MODEL
+
     def is_save_hidden_states(self):
         return self == SpeculativeDecodingMode.SAVE_HIDDEN_STATES
 
     def without_logits(self):
         return self.is_mtp_one_model() or self.is_eagle3_one_model(
+<<<<<<< HEAD
         ) or self.is_pard()
 
     def needs_kv_cache_rewind(self):
@@ -121,13 +130,28 @@ class SpeculativeDecodingMode(IntEnum):
     def support_overlap_scheduler(self):
         return self.is_mtp_one_model() or self.is_eagle3_one_model(
         ) or self.has_draft_model() or self.is_pard()
+=======
+        ) or self.is_draft_target_one_model()
+
+    def needs_kv_cache_rewind(self):
+        return self.is_mtp_one_model() or self.is_eagle3_one_model(
+        ) or self.is_ngram() or self.is_draft_target_one_model()
+
+    def support_overlap_scheduler(self):
+        return self.is_mtp_one_model() or self.is_eagle3_one_model(
+        ) or self.is_draft_target_one_model() or self.has_draft_model()
+>>>>>>> 9a360b295 (Draft Target One Model)
 
     def support_guided_decoder(self):
         return self.is_none() or self.has_spec_drafter()
 
     def support_capturable_guided_decoder(self):
         return self.is_mtp_one_model() or self.is_eagle3_one_model(
+<<<<<<< HEAD
         ) or self.is_pard()
+=======
+        ) or self.is_draft_target_one_model()
+>>>>>>> 9a360b295 (Draft Target One Model)
 
     def has_draft_model(self):
         return self.is_eagle3() or self.is_draft_target() or self.is_mtp_eagle()
@@ -145,11 +169,11 @@ class SpeculativeDecodingMode(IntEnum):
         Whether the draft model and target model are in the same model engine,
         and the draft model needs to load weights from the separate checkpoint.
         """
-        return self.is_eagle3_one_model() or self.is_pard()
+        return self.is_eagle3_one_model() or self.is_pard() or or self.is_draft_target_one_model()
 
     def has_spec_decoder(self):
         return self.is_mtp_one_model() or self.is_mtp_eagle() or self.is_eagle3(
-        ) or self.is_eagle3_one_model() or self.is_pard()
+        ) or self.is_eagle3_one_model() or self.is_pard() or or self.is_draft_target_one_model()
 
     def has_spec_drafter(self):
         return self.is_eagle3() or self.is_draft_target() or self.is_ngram(
