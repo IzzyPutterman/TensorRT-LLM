@@ -1005,6 +1005,7 @@ class SpecDecOneEngineForCausalLM(DecoderModelForCausalLM[TModel, TConfig],
         self.draft_config = None
         self.use_separate_draft_kv_cache = False
         spec_config = getattr(model_config, 'spec_config', None)
+        self.spec_config = spec_config
         if spec_config and spec_config.spec_dec_mode.use_one_engine():
             if spec_config.spec_dec_mode.is_eagle3_one_model():
                 if spec_config.eagle3_model_arch == "mistral_large3":
