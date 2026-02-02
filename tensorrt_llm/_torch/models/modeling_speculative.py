@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 from dataclasses import replace
+=======
+import inspect
+>>>>>>> 109c9a7cd (Working but wrong positions)
 from typing import Dict, Generic, List, Optional, Tuple
 
 import torch
@@ -986,7 +990,15 @@ def get_draft_model(model_config, draft_config, lm_head, model):
     elif spec_dec_mode.is_pard():
         return PARDForCausalLM(draft_config)
     elif spec_dec_mode.is_draft_target_one_model():
-        return AutoModelForCausalLM.from_config(draft_config)
+        # Set the layer index offset on the draft config so that attention
+        # layers are created with KV-cache indices that don't collide with the
+        # target model's layers (target uses [0, N), draft uses [N, N+M)).
+        num_target_layers = model_config.pretrained_config.num_hidden_layers
+        draft_config._frozen = False
+        draft_config.layer_idx_offset = num_target_layers
+        draft_config._frozen = True
+        draft_model = AutoModelForCausalLM.from_config(draft_config)
+        return draft_model
     else:
         raise NotImplementedError(
             f"get_draft_model does not support speculative decoding mode {spec_dec_mode}."
@@ -1167,10 +1179,14 @@ class SpecDecOneEngineForCausalLM(DecoderModelForCausalLM[TModel, TConfig],
     def load_draft_weights(self,
                            weights: Dict,
                            weight_mapper: Optional[BaseWeightMapper] = None):
-        self.draft_model.load_weights(weights=weights,
-                                      weight_mapper=weight_mapper)
-        spec_config = getattr(self.config, 'spec_config', None)
-        if spec_config and not spec_config.spec_dec_mode.is_draft_target_one_model(
+        args = inspect.getfullargspec(self.draft_model.load_weights).args
+        if "weight_mapper" in args:
+            self.draft_model.load_weights(weights=weights,
+                                          weight_mapper=weight_mapper)
+        else:
+            self.draft_model.load_weights(weights=weights)
+
+        if self.spec_config and not self.spec_config.spec_dec_mode.is_draft_target_one_model(
         ) and not self.model_config.spec_config.spec_dec_mode.is_pard():
             self.draft_model.load_weights_from_target_model(self)
 
